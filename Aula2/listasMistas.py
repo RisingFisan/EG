@@ -16,28 +16,19 @@ class TransformaLista(Transformer):
     def __init__(self):
         self.comp = 0
         self.soma = 0
+        self.count = False
         self.mais_comum = None
         self.output = {}
 
     def start(self, item):
         self.comp = len(item[1])
         ocurrences = dict()
-        total = -1
-        stop = False
+        total = 0
+        count = False
         for elem in item[1]:
             ocurrences.setdefault(elem,0)
             ocurrences[elem] += 1
 
-            if not stop:
-                match(elem):
-                    case "agora":
-                        total = 0
-                    case "fim":
-                        stop = True
-                    case x:
-                        if not isinstance(x, int): continue
-                        if x >= 0:
-                            total += x
         self.soma = total
         self.mais_comum = max(ocurrences.items(), key=lambda x: x[1])[0]
         self.output = {
@@ -57,6 +48,11 @@ class TransformaLista(Transformer):
         return int(n)
 
     def PALAVRA(self, p):
+        match(p):
+            case "agora":
+                self.count = True
+            case "fim":
+                self.count = False
         return p.value
 
     def INIT(self, pd):
