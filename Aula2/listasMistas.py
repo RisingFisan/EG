@@ -1,4 +1,5 @@
 from lark import Lark, Token, Transformer
+from collections import defaultdict
 
 grammar = '''
 start : INIT lista PONTO
@@ -17,20 +18,13 @@ class TransformaLista(Transformer):
         self.comp = 0
         self.soma = 0
         self.count = False
+        self.ocurrences = defaultdict(lambda: 0)
         self.mais_comum = None
         self.output = {}
 
     def start(self, item):
         self.comp = len(item[1])
-        ocurrences = dict()
-        total = 0
-        count = False
-        for elem in item[1]:
-            ocurrences.setdefault(elem,0)
-            ocurrences[elem] += 1
-
-        self.soma = total
-        self.mais_comum = max(ocurrences.items(), key=lambda x: x[1])[0]
+        self.mais_comum = max(self.ocurrences.items(), key=lambda x: x[1])[0]
         self.output = {
             'soma' : self.soma,
             'comp' : self.comp,
@@ -42,10 +36,14 @@ class TransformaLista(Transformer):
         return [x for x in lista if x != ',']
     
     def elemento(self, elemento):
+        self.ocurrences[elemento[0]] += 1
         return elemento[0]
 
     def NUMERO(self, n):
-        return int(n)
+        n = int(n)
+        if self.count:
+            self.soma += n
+        return n
 
     def PALAVRA(self, p):
         match(p):
