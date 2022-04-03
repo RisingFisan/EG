@@ -20,13 +20,13 @@ class If:
                 self.commands = cmds
 
     def __str__(self) -> str:
-        cmds = reduce(lambda acc, x: acc + [x] if isinstance(x, str) else acc + str(x).splitlines(), self.commands, list())
-        c = f"if ({self.condition}) {{ // nível {self.level}" + "\n\t" + '\n\t'.join(cmds) + "\n}"
+        cmds = lambda c : reduce(lambda acc, x: acc + [x] if isinstance(x, str) else acc + str(x).splitlines(), c, list())
+        c = f"if ({self.condition}) {{ // nível {self.level}" + "\n" + '\n'.join('\t' + x for x in cmds(self.commands)) + "\n}"
         if self.else_ != None:
             if isinstance(self.else_, If):
                 c += " else " + str(self.else_)
             else:
-                c += " else {\n\t" + '\n\t'.join(str(x) for x in self.else_) + "\n}"
+                c += " else {\n" + '\n'.join('\t' + str(x) for x in cmds(self.else_)) + "\n}"
         return c
 
 class Types(Enum):
@@ -69,6 +69,14 @@ class MyInterpreter(Interpreter):
         return result
 
     def operation(self, tree):
+        result = ' '.join(self.visit(x) if not isinstance(x,Token) else x for x in tree.children)
+        return result
+
+    def factor(self, tree):
+        result = ' '.join(self.visit(x) if not isinstance(x,Token) else x for x in tree.children)
+        return result
+
+    def term(self, tree):
         result = ' '.join(self.visit(x) if not isinstance(x,Token) else x for x in tree.children)
         return result
 
@@ -144,10 +152,13 @@ decl_float : "float" VAR (EQ VALUEF)? ";"
 decl_array : "int" VAR "[" INT? "]" (EQ array)? ";"
 commands : (assign | if_ | if_else)* 
 assign : VAR EQ operation ";"
-operation : "("? (VALUE | operation) ((PLUS | MINUS | TIMES | DIV | MOD) operation)? ")"?
+operation : (operation (PLUS | MINUS))* term
+term : (term (TIMES | DIV | MOD))* factor
+factor : VALUE | "(" operation ")"
 VAR : /[a-zA-Z_][a-zA-Z_0-9]*/
-VALUE : INT | VAR
-VALUEF : FLOAT | VALUE
+VALUEI : INT | VAR
+VALUEF : FLOAT | VAR
+VALUE : VALUEF | VALUEI
 INT : /\d+/
 FLOAT : /\d*\.\d+/
 EQ : "="
@@ -157,7 +168,7 @@ TIMES : "*"
 DIV : "/"
 MOD : "%"
 
-if_ : "if" cond "{" commands "}"
+if_ : "if" "(" cond ")" "{" commands "}"
 if_else : if_ "else" ("{" commands "}" | if_)
 
 !cond : NOT? operation (("==" | "<" | ">" | "<=" | ">=") operation)? ((AND | OR) cond)?
