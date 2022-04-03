@@ -1,5 +1,6 @@
 from lark import Lark, Token, Transformer
 from collections import defaultdict
+from operator import itemgetter
 
 grammar = '''
 start : INIT lista PONTO
@@ -24,7 +25,7 @@ class TransformaLista(Transformer):
 
     def start(self, item):
         self.comp = len(item[1])
-        self.mais_comum = max(self.ocurrences.items(), key=lambda x: x[1])[0]
+        self.mais_comum = max(self.ocurrences.items(), key=itemgetter(1))[0]
         self.output = {
             'soma' : self.soma,
             'comp' : self.comp,

@@ -1,42 +1,63 @@
-from lark import Lark, Token
+from enum import Enum
+from lark import Lark, Token, Tree
 from lark.visitors import Interpreter
+from functools import reduce
 
-def stringify(tree):
-    result = ""
-    for elem in tree:
-        if isinstance(elem, tuple):
-            result += "if (" + elem[0] + ") {\n\t" + '\n\t'.join(stringify(elem[1]).splitlines()) + "\n}\n"
-            if len(elem) == 3:
-                result += "else {\n\t" + '\n\t'.join(stringify(elem[1]).splitlines()) + "\n}\n"
-        else:
-            result += elem + ";\n"
-    return result
+class If:
+    def __init__(self, condition, commands, level, else_ = None):
+        self.condition = condition
+        self.commands = commands
+        self.else_ = else_
+        self.level = level
+
+    def concat(self):
+        if len(self.commands) == 1:
+            child = self.commands[0]
+            if isinstance(child, If) and child.else_ == None:
+                child.concat()
+                cmds = child.commands
+                self.condition = self.condition + ' && ' + child.condition
+                self.commands = cmds
+
+    def __str__(self) -> str:
+        cmds = reduce(lambda acc, x: acc + [x] if isinstance(x, str) else acc + str(x).splitlines(), self.commands, list())
+        c = f"if ({self.condition}) {{ // nível {self.level}" + "\n\t" + '\n\t'.join(cmds) + "\n}"
+        if self.else_ != None:
+            if isinstance(self.else_, If):
+                c += " else " + str(self.else_)
+            else:
+                c += " else {\n\t" + '\n\t'.join(str(x) for x in self.else_) + "\n}"
+        return c
+
+class Types(Enum):
+    INT = 0
+    FLOAT = 1
+    ARRAY = 2
 
 class MyInterpreter(Interpreter):
 
     def __init__(self):
-        self.initialized = set()
+        self.initialized = dict()
+        self.level = -1
 
     def start(self, tree):
-        attribs = self.visit(tree.children[0])
+        decls = self.visit(tree.children[0])
         r = self.visit(tree.children[1])
-        if isinstance(attribs, str):
-            return attribs
+        if isinstance(decls, str):
+            return decls
         else:
-            return '\n'.join(attribs) +'\n\n' + stringify(r)
+            return '\n'.join(decls) +'\n\n' + '\n'.join(str(x) for x in r)
 
     def commands(self, tree):
+        self.level += 1
         result = list()
         for child in tree.children:
-            result.append(self.visit(child))
-        # r = dict()
-        # for child in tree.children:
-        #     if child.data in ("if_","if_else"):
-        #         rr = self.visit(child)
-        #         for f in rr:
-        #             r[f] = rr[f] + 1
-        # return r
+            visited = self.visit(child)
+            if isinstance(visited, If):
+                visited.concat()
+            result.append(visited)
         
+        self.level -= 1
         return result
 
     def cond(self, tree):
@@ -44,7 +65,7 @@ class MyInterpreter(Interpreter):
         return result
 
     def assign(self, tree):
-        result = ' '.join(self.visit(x) if not isinstance(x,Token) else x for x in tree.children)
+        result = ' '.join(self.visit(x) if not isinstance(x,Token) else x for x in tree.children) + ';'
         return result
 
     def operation(self, tree):
@@ -58,33 +79,23 @@ class MyInterpreter(Interpreter):
             elif child.data == "commands":
                 d = self.visit(child)
 
-        if len(d) == 1 and isinstance(d[0], tuple) and len(d[0]) == 2:
-            return (cond + ' && ' + d[0][0], d[0][1])
-        else:
-            return (cond, d)
-
-        # r = dict()
-        # for child in tree.children:
-        #     if child.data in ("if_", "if_else"):
-        #         rr = self.visit(child)
-        #         for f in rr:
-        #             r[f] = rr[f] + 1 
-        # r[tree] = 0 
-        # return r
+        return If(cond, d, self.level)
 
     def if_else(self, tree):
+        if_ = None
         for child in tree.children:
             if child.data == "if_":
-                if_ = self.visit(child)
+                if if_ == None:
+                    if_ : If = self.visit(child)
+                else:
+                    else_c = self.visit(child)
             elif child.data == "commands":
                 else_c = self.visit(child)
 
-        if len(if_[1]) == 1 and isinstance(if_[1][0], tuple) and len(if_[1][0]) == 2:
-            return (if_[0] + ' && ' + if_[1][0][0], if_[1][0][1], else_c)
-        else:
-            return (if_[0], if_[1], else_c)
+        if_.else_ = else_c
+        return if_
 
-    def attribs(self, tree):
+    def decls(self, tree):
         result = list()
         errors = list()
         for child in tree.children:
@@ -94,25 +105,51 @@ class MyInterpreter(Interpreter):
             else:
                 result.append(v)
         if len(errors) > 0:
-            return "ERRO: " + ', '.join(errors) + " não atribuído(s)"
+            return "ERRO: " + ', '.join(errors) + " não declarado(s)"
         return result
 
-    def attrib_int(self, tree):
+    def decl_int(self, tree):
         if len(tree.children) == 1:
             return ("error", tree.children[0])
         return "int " + ' '.join(x.value for x in tree.children) + ";"
 
+    def decl_float(self, tree):
+        if len(tree.children) == 1:
+            return ("error", tree.children[0])
+        return "float " + ' '.join(x.value for x in tree.children) + ";"
+
+    def decl_array(self, tree : Tree):
+        var = None
+        size = None
+        elems = None
+        for child in tree.children:
+            if isinstance(child, Token):
+                if child.type == "VAR":
+                    var = child.value
+                elif child.type == "INT":
+                    size = int(child.value)
+            else:
+                v = self.visit(child)
+                elems = v
+        return f"int {var}[{size if size else ''}]{' = ' + elems if elems else ''};"
+
+    def array(self, tree):
+        return "[" + ','.join(self.visit(tree.children[0])) + "]"
+
 grammar = '''
-start : attribs commands
-attribs : (attrib_int | attrib_float)*
-attrib_int : "int" VAR (EQ VALUE)? ";"
-attrib_float : "float" VAR (EQ VALUEF)? ";"
+start : decls commands
+decls : (decl_int | decl_float | decl_array)*
+decl_int : "int" VAR (EQ VALUE)? ";"
+decl_float : "float" VAR (EQ VALUEF)? ";"
+decl_array : "int" VAR "[" INT? "]" (EQ array)? ";"
 commands : (assign | if_ | if_else)* 
 assign : VAR EQ operation ";"
-operation : "("? (VAR | VALUE | operation) ((PLUS | MINUS | TIMES | DIV | MOD) operation)? ")"?
+operation : "("? (VALUE | operation) ((PLUS | MINUS | TIMES | DIV | MOD) operation)? ")"?
 VAR : /[a-zA-Z_][a-zA-Z_0-9]*/
-VALUE : /\d+/
-VALUEF : /\d*\.\d+/
+VALUE : INT | VAR
+VALUEF : FLOAT | VALUE
+INT : /\d+/
+FLOAT : /\d*\.\d+/
 EQ : "="
 PLUS : "+"
 MINUS : "-"
@@ -121,10 +158,15 @@ DIV : "/"
 MOD : "%"
 
 if_ : "if" cond "{" commands "}"
-if_else : if_ "else" "{" commands "}"
+if_else : if_ "else" ("{" commands "}" | if_)
 
-!cond : NOT? operation (("==" | "<" | ">" | "<=" | ">=") operation)?
+!cond : NOT? operation (("==" | "<" | ">" | "<=" | ">=") operation)? ((AND | OR) cond)?
+AND : "&&" | "and"
+OR : "||" | "or"
 NOT : "!" | "not"
+
+array : "[" values "]"
+values : VALUE ("," VALUE)*
 
 %ignore /\s/
 '''
